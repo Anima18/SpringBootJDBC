@@ -1,0 +1,8 @@
+com/example/demo/DemoApplication.class
+com/example/demo/entity/Student.class
+com/example/demo/service/CourseServiceImpl.class
+com/example/demo/controller/CourseController.class
+com/example/demo/repository/CourseRepository.class
+com/example/demo/repository/StudentRepository.class
+com/example/demo/service/CourseService.class
+com/example/demo/entity/Courseware.class
