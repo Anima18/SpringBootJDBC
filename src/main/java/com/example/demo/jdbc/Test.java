@@ -1,5 +1,6 @@
 package com.example.demo.jdbc;
 
+import com.example.demo.dto.SchemaDto;
 import com.example.demo.jdbc.entity.DriverEntity;
 import com.example.demo.jdbc.entity.Schema;
 import com.example.demo.jdbc.entity.SimpleTable;
@@ -20,14 +21,11 @@ import java.util.stream.Collectors;
 public class Test {
     public static void main(String[] args){
         try {
-            List<DriverEntity> driverEntities = DriverEntityRepository.getInstance().readDriverEntities();
-            Map<String, DriverEntity> driverEntityMap = driverEntities.stream().collect(Collectors.toMap(com.example.demo.jdbc.entity.DriverEntity::getId, e->e, (k1, k2)->k1));
-
-            Schema schema = new Schema("test",
+            SchemaDto schema = new SchemaDto("test",
                     "jdbc:postgresql://192.168.44.99:5432/crux-scheduled-work",
                     "postgres",
                     "unitech",
-                    driverEntityMap.get("jdbcpostgresql42d2jre8"));
+                    "jdbcpostgresql42d2jre8");
 
             //testConnection(schema);
             testTableList(schema);
@@ -37,7 +35,7 @@ public class Test {
         }
     }
 
-    public static void testConnection(Schema schema) {
+    public static void testConnection(SchemaDto schema) {
         try {
             new DataSourceProvider().testConnection(schema);
             System.out.println("测试连接成功");
@@ -47,7 +45,7 @@ public class Test {
         }
     }
 
-    public static void testTableList(Schema schema) {
+    public static void testTableList(SchemaDto schema) {
         try {
             List<SimpleTable> tables = new DataSourceProvider().getTableList(schema);
             tables.forEach(simpleTable -> System.out.println(simpleTable.toString()));
@@ -56,7 +54,7 @@ public class Test {
         }
     }
 
-    public static void testTableDetail(Schema schema, String tableName) {
+    public static void testTableDetail(SchemaDto schema, String tableName) {
         try {
             DataSourceProvider dataSourceProvider = new DataSourceProvider();
             Connection cn = dataSourceProvider.getConnection(schema);

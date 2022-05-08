@@ -1,8 +1,10 @@
 package com.example.demo.jdbc.connection;
 
 import com.example.demo.jdbc.entity.DriverEntity;
+import com.example.demo.jdbc.exception.DBMetaResolverException;
 import com.example.demo.jdbc.util.FileUtil;
 import com.example.demo.jdbc.util.IOUtil;
+import org.springframework.stereotype.Component;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -15,6 +17,8 @@ import java.io.InputStream;
 import java.io.Reader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static com.example.demo.jdbc.constant.Constant.*;
 
@@ -22,13 +26,14 @@ import static com.example.demo.jdbc.constant.Constant.*;
  * @author jianjianhong
  * @date 2022/4/27
  */
+@Component
 public class DriverEntityRepository {
     private static final String REPOSITORY_PATH = "driver";
     private static final String REPOSITORY_FILE = "driverEntityInfo.xml";
     private File rootDirectory;
     private File driverEntityInfoFile;
 
-    private volatile static DriverEntityRepository instant;
+    /*private volatile static DriverEntityRepository instant;
 
     public static DriverEntityRepository getInstance() {
         if (instant == null) {
@@ -39,9 +44,9 @@ public class DriverEntityRepository {
             }
         }
         return instant;
-    }
+    }*/
 
-    private DriverEntityRepository() {
+    public DriverEntityRepository() {
         String localPath = System.getProperty("user.dir");
         rootDirectory = FileUtil.getDirectory(localPath+"/"+REPOSITORY_PATH);
         driverEntityInfoFile = FileUtil.getFile(rootDirectory, REPOSITORY_FILE);
@@ -51,6 +56,15 @@ public class DriverEntityRepository {
         return FileUtil.getFile(rootDirectory, driverId);
     }
 
+    public Map<String, DriverEntity> getDriverEntityMap() throws DBMetaResolverException {
+        try {
+            List<DriverEntity> driverEntities = readDriverEntities();
+            return driverEntities.stream().collect(Collectors.toMap(DriverEntity::getId, e->e, (k1, k2)->k1));
+        }catch (Exception e) {
+            throw new DBMetaResolverException(e);
+        }
+
+    }
     public List<DriverEntity> readDriverEntities() throws Exception {
         List<DriverEntity> driverEntities = null;
 

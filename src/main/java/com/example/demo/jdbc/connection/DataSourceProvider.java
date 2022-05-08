@@ -1,16 +1,21 @@
 package com.example.demo.jdbc.connection;
 
 
+import com.example.demo.dto.SchemaDto;
+import com.example.demo.dto.TableDetailInput;
 import com.example.demo.jdbc.entity.*;
 import com.example.demo.jdbc.exception.DBMetaResolverException;
 import com.example.demo.jdbc.exception.TableNotFoundException;
 import com.example.demo.jdbc.util.JDBCCompatiblity;
 import com.example.demo.jdbc.util.JdbcUtil;
 import com.example.demo.jdbc.util.TableType;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.dozermapper.core.Mapper;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
@@ -18,6 +23,7 @@ import java.sql.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * @author jianjianhong
@@ -30,13 +36,30 @@ public class DataSourceProvider {
 
     private Cache<ConnectionIdentity, InternalDataSourceHolder> internalDataSourceCache;
 
+    @Autowired
+    private DriverEntityRepository driverEntityRepository;
+    @Autowired
+    private Mapper mapper;
+
     public DataSourceProvider() {
         this.internalDataSourceCache = Caffeine.newBuilder().maximumSize(50)
                 .expireAfterAccess(60 * 24, TimeUnit.MINUTES)
                 .removalListener(new DriverBasicDataSourceRemovalListener()).build();
     }
 
-    public Connection getConnection(Schema schema) throws DBMetaResolverException {
+    private Schema getSchema(SchemaDto input) throws DBMetaResolverException {
+        Schema schema = mapper.map(input, Schema.class);
+        DriverEntity driverEntity = driverEntityRepository.getDriverEntityMap().get(input.getDriverPath());
+
+        if(driverEntity == null) {
+            throw new DBMetaResolverException("["+input.getDriverPath()+"]数据库驱动程序不存在！");
+        }
+        schema.setDriverEntity(driverEntity);
+        return schema;
+    }
+
+    public Connection getConnection(SchemaDto input) throws DBMetaResolverException {
+        Schema schema = getSchema(input);
         Driver driver = loadDriver(schema);
 
         String url = schema.getUrl();
@@ -82,7 +105,7 @@ public class DataSourceProvider {
 
         //动态加载驱动程序
         try {
-            PathDriverClassLoader pathDriverClassLoader = new PathDriverClassLoader(DriverEntityRepository.getInstance().getDriverFile(driverId));
+            PathDriverClassLoader pathDriverClassLoader = new PathDriverClassLoader(driverEntityRepository.getDriverFile(driverId));
             Class<?> driverToolClass = pathDriverClassLoader.loadClass(DriverTool.class.getName());
             Object driverTool = driverToolClass.newInstance();
             Class.forName(driverClassName, true, pathDriverClassLoader);
@@ -97,51 +120,17 @@ public class DataSourceProvider {
         }
     }
 
-    /**
-     * 获取数据库连接
-     * @param schema
-     * @return
-     * @throws Exception
-     */
-    public Connection getConnection2(Schema schema) throws DBMetaResolverException {
-        ConnectionOption connectionOption = ConnectionOption.valueOf(schema.getUrl(), schema.getUser(), schema.getPassword());
-
-        DriverEntity driverEntity = schema.getDriverEntity();
-        String driverId = driverEntity.getId();
-        String driverClassName = driverEntity.getDriverClassName();
-
-        //动态加载驱动程序
-        try {
-            PathDriverClassLoader pathDriverClassLoader = new PathDriverClassLoader(DriverEntityRepository.getInstance().getDriverFile(driverId));
-            Class<?> driverToolClass = pathDriverClassLoader.loadClass(DriverTool.class.getName());
-            Object driverTool = driverToolClass.newInstance();
-            Class.forName(driverClassName, true, pathDriverClassLoader);
-            Driver driver = (Driver) driverTool.getClass().getMethod("getDriver", String.class).invoke(driverTool, driverClassName);
-
-            if(!driver.acceptsURL(connectionOption.getUrl())) {
-                throw new Exception(driverEntity + " 's driver can not accept url [" + connectionOption.getUrl() + "]");
-            }
-            Properties properties = new Properties();
-
-            if (connectionOption.getProperties() != null)
-                properties.putAll(connectionOption.getProperties());
-            Connection cn = driver.connect(connectionOption.getUrl(), properties);
-            return cn;
-        } catch (Exception e) {
-            throw new DBMetaResolverException(e);
-        }
-    }
 
     /**
      * 获取数据库表列表
-     * @param schema
+     * @param input
      * @throws Exception
      */
-    public List<SimpleTable> getTableList(Schema schema) throws DBMetaResolverException {
+    public List<SimpleTable> getTableList(SchemaDto input) throws DBMetaResolverException {
         Connection cn = null;
         List<SimpleTable> tables = new ArrayList<>();
         try {
-            cn = getConnection(schema);
+            cn = getConnection(input);
 
             String catalog = cn.getCatalog();
             DatabaseMetaData metaData = cn.getMetaData();
@@ -166,10 +155,14 @@ public class DataSourceProvider {
             String name = rs.getString("TABLE_NAME");
             String type = TableType.toTableType(rs.getString("TABLE_TYPE"));
             String remarks = rs.getString("REMARKS");
-            System.out.println(name);
             tables.add(new SimpleTable(name, type, remarks));
         }
         return tables;
+    }
+
+    public TableDetail getTableDetail(TableDetailInput input) throws DBMetaResolverException {
+        Connection connection = getConnection(input.getSchemaDto());
+        return getTableDetail(connection, input.getTableName());
     }
 
     /**
@@ -276,12 +269,11 @@ public class DataSourceProvider {
         return schema;
     }
 
-    public void testConnection(Schema schema) throws DBMetaResolverException {
+    public Boolean testConnection(SchemaDto input) throws DBMetaResolverException {
         Connection cn = null;
         try {
-            cn = getConnection(schema);
-        }catch (DBMetaResolverException e) {
-            throw e;
+            cn = getConnection(input);
+            return true;
         }finally {
             if(cn != null) {
                 JdbcUtil.closeConnection(cn);
