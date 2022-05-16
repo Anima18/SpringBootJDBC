@@ -1,8 +1,11 @@
 package com.example.demo.jdbc.connection;
 
 
+import com.example.demo.dto.RowDto;
 import com.example.demo.dto.SchemaDto;
+import com.example.demo.dto.TableDataListInput;
 import com.example.demo.dto.TableDetailInput;
+import com.example.demo.dto.base.PagedResultDto;
 import com.example.demo.jdbc.entity.*;
 import com.example.demo.jdbc.exception.DBMetaResolverException;
 import com.example.demo.jdbc.exception.TableNotFoundException;
@@ -17,8 +20,10 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.web.bind.annotation.RequestBody;
 
 import javax.sql.DataSource;
+import javax.validation.Valid;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -144,7 +149,7 @@ public class DataSourceProvider {
                 JdbcUtil.closeConnection(cn);
             }
         }
-        return tables;
+        return tables.stream().filter(table->table.getType().equals("TABLE")).collect(Collectors.toList());
     }
 
     private List<SimpleTable> getTableList(String catalog, DatabaseMetaData metaData, String schemaStr, String tableNamePattern) throws Exception {
@@ -278,6 +283,351 @@ public class DataSourceProvider {
             if(cn != null) {
                 JdbcUtil.closeConnection(cn);
             }
+        }
+    }
+
+
+    public PagedResultDto<RowDto> getTableData(TableDataListInput input) throws DBMetaResolverException {
+        TableDetail table = input.getTableDetail();
+        if (table.getColumns() == null || table.getColumns().isEmpty())
+            throw new DBMetaResolverException("table["+table.getName()+"]列结构为空");
+
+        Connection connection = getConnection(input.getSchemaDto());
+
+        Long totalCount = getTableCount(connection, input.getTableDetail());
+
+        int startRow = input.getPageSize() * (input.getPage()) + 1;
+        int count = input.getPageSize();
+        String sql = buildTableSql(input, startRow, count);
+        try (PreparedStatement pstmt =connection.prepareStatement(sql); ResultSet rs = pstmt.executeQuery()){
+            List<RowDto> rowDtos = mapToRows(connection, table, rs, startRow, count);
+
+            return new PagedResultDto<>(totalCount, rowDtos);
+        } catch (SQLException e) {
+            throw new DBMetaResolverException(e);
+        }
+    }
+
+    protected List<RowDto> mapToRows(Connection cn, TableDetail table, ResultSet rs, int startRow, int count)
+            throws SQLException {
+        if (startRow < 1)
+            startRow = 1;
+
+        List<RowDto> resultList = new ArrayList<>();
+
+/*
+        if (count >= 0 && startRow > 1)
+            forwardBefore(rs, startRow);
+*/
+
+        int endRow = (count >= 0 ? startRow + count : -1);
+
+        int rowIndex = startRow;
+        while (rs.next()) {
+            if (endRow >= 0 && rowIndex >= endRow)
+                break;
+
+            RowDto row = mapToRow(cn, table, rs);
+
+            resultList.add(row);
+
+            rowIndex++;
+        }
+
+        return resultList;
+    }
+
+
+    /**
+     * 将结果集行映射为Row对象。
+     *
+     * @param cn
+     * @param table
+     * @param rs
+     * @return
+     */
+    public RowDto mapToRow(Connection cn, TableDetail table, ResultSet rs)
+            throws DBMetaResolverException {
+        RowDto row = new RowDto();
+
+        try  {
+            for(Column column : table.getColumns()) {
+                Object value = getColumnValue(rs, column);
+                row.put(column.getName(), value);
+            }
+        }  catch (SQLException e) {
+            throw new DBMetaResolverException(e);
+        }
+
+        return row;
+    }
+
+    /**
+     * 获取列值。
+     * <p>
+     * 此方法实现参考自JDBC4.0规范“Data Type Conversion Tables”章节中的“Type Conversions
+     * Supported by ResultSet getter Methods”表，并且使用其中的最佳方法。
+     * </p>
+     *
+     * @param rs
+     * @param column
+     * @return
+     * @throws SQLException
+     */
+    @JDBCCompatiblity("某些驱动程序可能不支持ResultSet.getObject方法，所以这里没有使用")
+    public Object getColumnValue( ResultSet rs, Column column) throws SQLException {
+        Object value = null;
+        String columnName = column.getName();
+        int sqlType = column.getType();
+
+        switch (sqlType) {
+            case Types.ARRAY: {
+                value = rs.getArray(columnName);
+                break;
+            }
+
+            case Types.BIGINT: {
+                value = rs.getLong(columnName);
+                break;
+            }
+
+            case Types.BINARY:  {
+                value = rs.getBytes(columnName);
+                break;
+            }
+
+            case Types.BIT: {
+                value = rs.getBoolean(columnName);
+                break;
+            }
+
+            case Types.BLOB:  {
+                value = rs.getBlob(columnName);
+                break;
+            }
+
+            case Types.BOOLEAN: {
+                value = rs.getBoolean(columnName);
+                break;
+            }
+
+            case Types.CHAR: {
+                value = rs.getString(columnName);
+                break;
+            }
+
+            case Types.CLOB: {
+                value = rs.getClob(columnName);
+                break;
+            }
+
+            case Types.DATALINK: {
+                value = rs.getObject(columnName);
+                break;
+            }
+
+            case Types.DATE: {
+                value = rs.getDate(columnName);
+                break;
+            }
+
+            case Types.DECIMAL: {
+                value = rs.getBigDecimal(columnName);
+                break;
+            }
+
+            case Types.DISTINCT: {
+                value = rs.getObject(columnName);
+                break;
+            }
+
+            case Types.DOUBLE: {
+                value = rs.getDouble(columnName);
+                break;
+            }
+
+            case Types.FLOAT: {
+                value = rs.getFloat(columnName);
+                break;
+            }
+
+            case Types.INTEGER: {
+                value = rs.getInt(columnName);
+                break;
+            }
+
+            case Types.JAVA_OBJECT: {
+                value = rs.getObject(columnName);
+                break;
+            }
+
+            case Types.LONGNVARCHAR: {
+                value = rs.getNCharacterStream(columnName);
+                break;
+            }
+
+            case Types.LONGVARBINARY: {
+                value = rs.getBinaryStream(columnName);
+                break;
+            }
+
+            case Types.LONGVARCHAR: {
+                value = rs.getCharacterStream(columnName);
+                break;
+            }
+
+            case Types.NCHAR: {
+                value = rs.getNString(columnName);
+                break;
+            }
+
+            case Types.NCLOB: {
+                value = rs.getNClob(columnName);
+                break;
+            }
+
+            case Types.NUMERIC: {
+                value = rs.getBigDecimal(columnName);
+                break;
+            }
+
+            case Types.NVARCHAR: {
+                value = rs.getNString(columnName);
+                break;
+            }
+
+            case Types.OTHER: {
+                value = rs.getObject(columnName);
+                break;
+            }
+
+            case Types.REAL: {
+                value = rs.getFloat(columnName);
+                break;
+            }
+
+            case Types.REF: {
+                value = rs.getRef(columnName);
+                break;
+            }
+
+            case Types.REF_CURSOR: {
+                value = rs.getObject(columnName);
+                break;
+            }
+
+            case Types.ROWID:  {
+                value = rs.getRowId(columnName);
+                break;
+            }
+
+            case Types.SMALLINT: {
+                value = rs.getShort(columnName);
+                break;
+            }
+
+            case Types.SQLXML: {
+                value = rs.getSQLXML(columnName);
+                break;
+            }
+
+            case Types.STRUCT: {
+                value = rs.getObject(columnName);
+                break;
+            }
+
+            case Types.TIME:
+            case Types.TIME_WITH_TIMEZONE: {
+                value = rs.getTime(columnName);
+                break;
+            }
+
+            case Types.TIMESTAMP:
+            case Types.TIMESTAMP_WITH_TIMEZONE: {
+                value = rs.getTimestamp(columnName);
+                break;
+            }
+
+            case Types.TINYINT: {
+                value = rs.getByte(columnName);
+                break;
+            }
+
+            case Types.VARBINARY:  {
+                value = rs.getBytes(columnName);
+                break;
+            }
+
+            case Types.VARCHAR: {
+                value = rs.getString(columnName);
+                break;
+            }
+
+            default: {
+                throw new UnsupportedOperationException("Get JDBC [" + sqlType + "] type value is not supported");
+            }
+        }
+
+        if (rs.wasNull())
+            value = null;
+
+        return value;
+    }
+
+    /**
+     * 将一个未移动过游标的{@linkplain ResultSet}游标前移至指定行之前。
+     *
+     * @param rs
+     * @param rowIndex
+     *            行号，以{@code 1}开始
+     * @throws SQLException
+     */
+    public void forwardBefore(ResultSet rs, int rowIndex) throws SQLException {
+        // 第一行不做任何操作，避免不必要的调用可能导致底层不支持而报错
+        if (rowIndex == 1)
+            return;
+
+        try  {
+            rs.absolute(rowIndex - 1);
+        } catch (SQLException e) {
+            @JDBCCompatiblity("避免驱动程序或者ResultSet不支持absolute而抛出异常")
+            int i = 1;
+            for (; i < rowIndex; i++) {
+                if (!rs.next())
+                    break;
+            }
+        }
+    }
+
+    private String buildTableSql(TableDataListInput input, int startRow, int count) {
+
+
+        TableDetail table = input.getTableDetail();
+        List<Column> columns =  table.getColumns();
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("SELECT ");
+        for(int i=0; i<columns.size(); i++) {
+            builder.append(columns.get(i).getName());
+            builder.append(" ");
+            if(i < columns.size()-1) {
+                builder.append(",");
+            }
+        }
+        builder.append(" FROM "+table.getName()+" ");
+        builder.append(" LIMIT " + count + " OFFSET " + (startRow - 1));
+        return builder.toString();
+    }
+
+    private long getTableCount(Connection cn, TableDetail table) throws DBMetaResolverException {
+        String sql = String.format("SELECT COUNT(*) FROM %s", table.getName());
+
+        try ( PreparedStatement pstmt =cn.prepareStatement(sql); ResultSet rs = pstmt.executeQuery()){
+            boolean nexted = rs.next();
+            long totalCount = rs.getLong(1);
+            return totalCount;
+        } catch (SQLException e) {
+            throw new DBMetaResolverException(e);
         }
     }
 }

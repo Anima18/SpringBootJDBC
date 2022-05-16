@@ -1,14 +1,15 @@
 package com.example.demo.controller;
 
+import com.example.demo.dto.TableDataListInput;
+import com.example.demo.dto.base.PagedResultDto;
+import com.example.demo.dto.RowDto;
 import com.example.demo.dto.SchemaDto;
 import com.example.demo.dto.TableDetailInput;
-import com.example.demo.entity.Courseware;
+import com.example.demo.dto.base.PagingQuery;
 import com.example.demo.jdbc.connection.DataSourceProvider;
 import com.example.demo.jdbc.entity.SimpleTable;
 import com.example.demo.jdbc.entity.TableDetail;
-import com.example.demo.service.CourseService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -50,4 +51,15 @@ public class ConnectionController {
             return null;
         }
     }
+
+    @PostMapping("/connection/tableData")
+    public PagedResultDto<RowDto> getTableData(@Valid @RequestBody TableDataListInput input) {
+        try {
+            return dataSourceProvider.getTableData(input);
+        }catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
 }
